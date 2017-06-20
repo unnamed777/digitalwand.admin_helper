@@ -224,20 +224,34 @@ class CheckboxWidget extends HelperWidget
                     }
                 }
 
-            } elseif (isset($entityMap[$columnName]['values']) AND
-                is_array($entityMap[$columnName]['values']) AND
-                count($entityMap[$columnName]['values']) == 2
-            ) {
-                $value = reset($entityMap[$columnName]['values']);
-                if (is_string($value)) {
-                    return static::TYPE_STRING;
-                } elseif (is_bool($value) OR is_integer($value)) {
-                    return static::TYPE_BOOLEAN;
+            } else {
+                $columnData = [];
+
+                if (is_object($entityMap[$columnName])) {
+                    $columnData['data_type'] = $entityMap[$columnName]->getDataType();
+
+                    if ($entityMap[$columnName] instanceof \Bitrix\Main\Entity\EnumField) {
+                        $columnData['values'] = $entityMap[$columnName]->getValues();
+                    }
+                } else {
+                    $columnData = $entityMap[$columnName];
                 }
 
-            } elseif (isset($entityMap[$columnName]['data_type'])) {
-                return $entityMap[$columnName]['data_type'];
+                if (isset($columnData['values']) AND
+                    is_array($columnData['values']) AND
+                    count($columnData['values']) == 2
+                ) {
+                    $value = reset($columnData['values']);
+                    if (is_string($value)) {
+                        return static::TYPE_STRING;
+                    } elseif (is_bool($value) OR is_integer($value)) {
+                        return static::TYPE_BOOLEAN;
+                    }
 
+                } elseif (isset($columnData['data_type'])) {
+                    return $columnData['data_type'];
+
+                }
             }
 
             /**
