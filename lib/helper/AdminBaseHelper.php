@@ -608,7 +608,7 @@ abstract class AdminBaseHelper
 	 * @return string
 	 * @api
 	 */
-	public function pk()
+	public static function pk()
 	{
 		return 'ID';
 	}

@@ -2,12 +2,11 @@
 
 namespace DigitalWand\AdminHelper\Helper;
 
-use Bitrix\Main\Context;
-use Bitrix\Main\HttpRequest;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Entity\DataManager;
 use Bitrix\Main\DB\Result;
 use DigitalWand\AdminHelper\EntityManager;
+use DigitalWand\AdminHelper\Sorting;
 
 Loc::loadMessages(__FILE__);
 
@@ -83,7 +82,7 @@ abstract class AdminListHelper extends AdminBaseHelper
 	/**
 	 * @var string
 	 * Код функции, вызываемой при клике на строке списка
-	 * @see AdminListHelper::genPipupActionJS()
+	 * @see AdminListHelper::genPopupActionJS()
 	 */
 	protected $popupClickFunctionCode;
 	/**
@@ -185,7 +184,7 @@ abstract class AdminListHelper extends AdminBaseHelper
 		$this->prepareAdminVariables();
 
 		$className = static::getModel();
-		$oSort = $this->initSortingParameters(Context::getCurrent()->getRequest());
+		$oSort = $this->initSortingParameters();
 		$this->list = new \CAdminList($this->getListTableID(), $oSort);
 		$this->list->InitFilter($this->arFilterFields);
 
@@ -199,32 +198,76 @@ abstract class AdminListHelper extends AdminBaseHelper
 			}
 		}
 		if ($IDs = $this->list->GroupAction() AND $this->hasWriteRights()) {
+
+		    //Элементы выбраны галочкой "Для всех". Нужно собрать все элементы и разделы,
+            //попадающие под текущий фильтр, и передать их ID на удаление
+
 			if ($_REQUEST['action_target'] == 'selected') {
-				$this->setContext(AdminListHelper::OP_GROUP_ACTION);
-				$IDs = array();
+                $this->setContext(AdminListHelper::OP_GROUP_ACTION);
 
-				//Текущий фильтр должен быть модифицирован виждтами
-				//для соответствия результатов фильтрации тому, что видит пользователь в интерфейсе.
-				$raw = array(
-					'SELECT' => $this->pk(),
-					'FILTER' => $this->arFilter,
-					'SORT' => array()
-				);
+                //Если находимся в подразделе, то его нужно учесть при фильтрации
+                if (isset($_GET['SECTION_ID'])) {
+                    $sectionField = static::getSectionField();
+                    $this->arFilter[$sectionField] = $_GET['SECTION_ID'];
+                }
 
-				foreach ($this->fields as $code => $settings) {
-					$widget = $this->createWidgetForField($code);
-					$widget->changeGetListOptions($this->arFilter, $raw['SELECT'], $raw['SORT'], $raw);
-				}
+                $IDs = array();
 
-				$res = $className::getList(array(
-					'filter' => $this->arFilter,
-					'select' => array($this->pk()),
-				));
+                //Текущий фильтр должен быть модифицирован виждтами
+                //для соответствия результатов фильтрации тому, что видит пользователь в интерфейсе.
+                $raw = array(
+                    'SELECT' => $this->pk(),
+                    'FILTER' => $this->arFilter,
+                    'SORT' => array()
+                );
 
-				while ($el = $res->Fetch()) {
-					$IDs[] = $el[$this->pk()];
-				}
-			}
+                foreach ($this->fields as $code => $settings) {
+                    $widget = $this->createWidgetForField($code);
+                    $widget->changeGetListOptions($this->arFilter, $raw['SELECT'], $raw['SORT'], $raw);
+                }
+
+                $res = $className::getList(array(
+                    'filter' => $this->arFilter,
+                    'select' => array($this->pk()),
+                ));
+
+                while ($el = $res->Fetch()) {
+                    $IDs[] = $el[$this->pk()];
+                }
+
+                //Собираем ID разделов, если они используются
+                $sectionEditHelperClass = $this->getHelperClass(AdminSectionEditHelper::className());
+                if ($sectionEditHelperClass) {
+                    $sectionFilter = $this->arFilter;
+                    $sectionsInterfaceSettings = static::getInterfaceSettings($sectionEditHelperClass::getViewName());
+
+                    if ($sectionEditHelperClass && !isset($_REQUEST['model-section'])) {
+                        $sectionClassName = $sectionEditHelperClass::getModel();
+                    } else {
+                        $sectionClassName = $_REQUEST['model-section'];
+                    }
+
+                    foreach ($sectionFilter as $elementFieldName => $elementFilterValue) {
+                        $elementFieldNameEscaped = $this->escapeFilterFieldName($elementFieldName);
+                        if (!isset($sectionsInterfaceSettings['FIELDS'][$elementFieldNameEscaped])) {
+                            unset($sectionFilter[$elementFieldName]);
+                        }
+                    }
+                    if (isset($_GET['SECTION_ID'])) {
+                        $sectionField = $sectionEditHelperClass::getSectionField();
+                        $sectionFilter[$sectionField] = $_GET['SECTION_ID'];
+                    }
+
+                    $res = $sectionClassName::getList(array(
+                        'filter' => $sectionFilter,
+                        'select' => array($this->pk()),
+                    ));
+
+                    while ($el = $res->Fetch()) {
+                        $IDs[] = 's' . $el[$this->pk()];
+                    }
+                }
+            }
 
 			$filteredIDs = array();
 
@@ -269,18 +312,12 @@ abstract class AdminListHelper extends AdminBaseHelper
 	 * Инициализирует параметры сортировки на основании запроса
 	 * @return \CAdminSorting
 	 */
-	protected function initSortingParameters(HttpRequest $request)
+	protected function initSortingParameters()
 	{
 		$sortByParameter = 'by';
 		$sortOrderParameter = 'order';
 
-		$sortBy = $request->get($sortByParameter);
-		$sortBy = $sortBy ?: static::pk();
-
-		$sortOrder = $request->get($sortOrderParameter);
-		$sortOrder = $sortOrder ?: 'desc';
-
-		return new \CAdminSorting($this->getListTableID(), $sortBy, $sortOrder, $sortByParameter, $sortOrderParameter);
+		return new Sorting($this->getListTableID(), $this->pk(), 'desc', $sortByParameter, $sortOrderParameter, $this);
 	}
 
 	/**
@@ -869,8 +906,6 @@ abstract class AdminListHelper extends AdminBaseHelper
 		$visibleColumns = array_unique($visibleColumns);
 		$sectionsVisibleColumns = array_unique($sectionsVisibleColumns);
 
-		// Поля для селекта (перевернутый массив)
-		$listSelect = array_flip($visibleColumns);
 		foreach ($this->fields as $code => $settings) {
             if($_REQUEST['del_filter'] !== 'Y') {
                 $widget = $this->createWidgetForField($code);
@@ -878,11 +913,9 @@ abstract class AdminListHelper extends AdminBaseHelper
             }
 			// Множественные поля не должны быть в селекте
 			if (!empty($settings['MULTIPLE'])) {
-				unset($listSelect[$code]);
+            	$visibleColumns = array_diff($visibleColumns, array($code));
 			}
 		}
-		// Поля для селекта (множественные поля отфильтрованы)
-		$listSelect = array_flip($listSelect);
 
 		if ($sectionEditHelper) // Вывод разделов и элементов в одном списке
 		{
@@ -919,7 +952,7 @@ abstract class AdminListHelper extends AdminBaseHelper
 					}
 					$row = $this->list->AddRow($data[$this->pk()], $data, $link, $name);
 					foreach ($this->fields as $code => $settings) {
-						if(in_array($code, $listSelect)) {
+						if(in_array($code, $visibleColumns)) {
 							$this->addRowCell($row, $code, $data,
 							isset($this->tableColumnsMap[$code]) ? $this->tableColumnsMap[$code] : false);
 						}
@@ -931,7 +964,7 @@ abstract class AdminListHelper extends AdminBaseHelper
 		else // Обычный вывод элементов без использования разделов
 		{
 			$this->totalRowsCount = $className::getCount($this->getElementsFilter($this->arFilter));
-			$res = $this->getData($className, $this->arFilter, $listSelect, $sort, $raw);
+			$res = $this->getData($className, $this->arFilter, $visibleColumns, $sort, $raw);
 			$res = new \CAdminResult($res, $this->getListTableID());
 			$this->customNavStart($res);
 			// отключаем отображение всех элементов, если установлено св-во
@@ -942,7 +975,7 @@ abstract class AdminListHelper extends AdminBaseHelper
 				list($link, $name) = $this->getRow($data);
 				$row = $this->list->AddRow($data[$this->pk()], $data, $link, $name);
 				foreach ($this->fields as $code => $settings) {
-					if(in_array($code, $listSelect)) {
+					if(in_array($code, $visibleColumns)) {
 						$this->addRowCell($row, $code, $data);
 					}
 				}
@@ -1123,7 +1156,9 @@ abstract class AdminListHelper extends AdminBaseHelper
 		$elementLimit = $limitData[1] - count($returnData);
 		$elementModel = static::$model;
 		$elementFilter = $this->arFilter;
-		$elementFilter[$elementEditHelperClass::getSectionField()] = $sectionId;
+		if(get_called_class() != static::getHelperClass(AdminSectionListHelper::className())) {
+            $elementFilter[$elementEditHelperClass::getSectionField()] = $sectionId;
+        }
 		// добавляем к общему количеству элементов количество элементов
 		$this->totalRowsCount += $elementModel::getCount($this->getElementsFilter($elementFilter));
 

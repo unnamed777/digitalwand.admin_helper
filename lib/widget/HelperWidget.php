@@ -57,7 +57,7 @@ use Bitrix\Main\Entity\DataManager;
  * <li><b>EDIT_IN_LIST</b> - параметр не обрабатывается непосредственно виджетом, однако используется хэлпером.
  *     Указывает, можно ли редактировать данное поле в спискке</li>
  * <li><b>MULTIPLE</b> - bool является ли поле множественным</li>
- * <li><b>MULTIPLE_FIELDS</b> - bool поля используемые в хранилище множественных значений и их алиасы</li>
+ * <li><b>MULTIPLE_FIELDS</b> - array поля используемые в хранилище множественных значений и их алиасы</li>
  * <li><b>LIST</b> - отображать ли поле в списке доступных в настройках столбцов таблицы (по-умолчанию true)</li>
  * <li><b>HEADER</b> - является ли столбец отображаемым по-умолчанию, если вывод столбцов таблицы не настроен (по-умолчанию true)</li>
  * </ul>
@@ -116,7 +116,7 @@ use Bitrix\Main\Entity\DataManager;
  * </li>
  *
  * <li>
- * Что бы виджет работал во множественном режиме, нужно при описании интерфейса поля указать параметр MULTIPLE => true
+ * Чтобы виджет работал во множественном режиме, нужно при описании интерфейса поля указать параметр MULTIPLE => true
  * ```
  * 'RELATED_LINKS' => array(
  *        'WIDGET' => new StringWidget(),
@@ -232,7 +232,7 @@ abstract class HelperWidget
      */
     public function showBasicEditField($isPKField)
     {
-        if ($this->getSettings('HIDE_WHEN_CREATE') AND !isset($this->data['ID'])) {
+        if ($this->getSettings('HIDE_WHEN_CREATE') AND !isset($this->data[$this->helper->pk()])) {
             return;
         }
 
@@ -297,11 +297,11 @@ abstract class HelperWidget
     {
         $rsEntityData = null;
         $values = array();
-        if (!empty($this->data['ID'])) {
+        if (!empty($this->data[$this->helper->pk()])) {
             $entityName = $this->entityName;
             $rsEntityData = $entityName::getList(array(
                 'select' => array('REFERENCE_' => $this->getCode() . '.*'),
-                'filter' => array('=ID' => $this->data['ID'])
+                'filter' => array('=ID' => $this->data[$this->helper->pk()])
             ));
 
             if ($rsEntityData) {
@@ -740,7 +740,7 @@ abstract class HelperWidget
         $fieldsFlip = array_flip($fields);
 
         if (isset($fieldsFlip[$fieldName])) {
-            return $fieldsFlip[$fieldName];
+            return $fieldName;
         }
 
         return $fieldName;
@@ -814,7 +814,7 @@ abstract class HelperWidget
      */
     protected function getEditableListInputName()
     {
-        $id = $this->data['ID'];
+        $id = $this->data[$this->helper->pk()];
 
         return 'FIELDS[' . $id . '][' . $this->getCode() . ']';
     }
@@ -1027,7 +1027,7 @@ abstract class HelperWidget
                  * @private
                  */
                 _getAddButton: function () {
-                    return '<input type="button" value="Добавить..." class="add-field-button">';
+                    return '<input type="button" value="<?=Loc::getMessage('DIGITALWAND_AH_MULTI_ADD')?>" class="add-field-button">';
                 },
                 /**
                  * Отслеживание событий
