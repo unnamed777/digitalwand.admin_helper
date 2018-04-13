@@ -454,13 +454,20 @@ abstract class AdminBaseHelper
 		}
 
 		$sectionModelClass = $sectionListHelper::getModel();
-		$sectionModelClass = preg_replace('/Table$/', '', $sectionModelClass);
 		$modelClass = static::getModel();
 
 		foreach ($modelClass::getMap() as $field => $data) {
 			if ($data instanceof ReferenceField && $data->getDataType() . 'Table' === $sectionModelClass) {
-				return str_replace('=this.', '', reset($data->getReference()));
+			    $field = key($data->getReference());
+
+			    if (strpos($field, '=this.') === false) {
+			        $field = current($data->getReference());
+                }
+
+                $result = str_replace('=this.', '', $field);
+                return $result;
 			}
+
 			if (is_array($data) && $data['data_type'] === $sectionModelClass) {
 				return str_replace('=this.', '', key($data['reference']));
 			}
